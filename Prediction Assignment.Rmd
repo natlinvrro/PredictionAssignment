@@ -1,0 +1,148 @@
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE, cache = TRUE)
+```
+
+# Practical Machine Learning Course Assignment
+### August 2019
+
+## Background
+A number of devices that inexpensively collects large amounts of personal activity data are now available. Regularly, people measure how much of a particular activity they do, and do not measure the quality of the activity. This project aims to use data collected from 6 participants asked to perform barbell lifts correctly and incorrectly in 5 different ways. The data was obtained through accelerometers placed on the belt, forearm, arm and dumbell.
+
+## Data Processing
+1. Loading the Required Packages
+
+```{r, results='hide'}
+library(dplyr)
+library(caret)
+library(e1071)
+library(randomForest)
+```
+
+2. Reading the Data
+
+```{r reading}
+trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train <- read.csv(trainURL) %>% select(-c(1:7))
+test <- read.csv(testURL) %>% select(-c(1:7))
+```
+
+3. Cleaning the Data
+
+In this section, columns with NA and variances near zero are dropped from the dataset.
+
+```{r cleaning}
+#Removing Columns with NA
+train.cleanNA <- train[ , colSums(is.na(train)) == 0]
+test.cleanNA <- test[ , colSums(is.na(test)) == 0]
+
+#Removing Columns with Nearly 1 Value Only
+nearzero <- nearZeroVar(train.cleanNA,saveMetrics=TRUE)
+train.cleaned <- train.cleanNA[ , nearzero$nzv == FALSE]
+```
+
+4. Splitting the Data
+
+The data was partitioned: 70% was for training and 30% was for validation.
+
+```{r partitioning}
+set.seed(1234)
+
+#Data Partition
+train.index <- createDataPartition(train.cleaned$classe, p = 0.70, list=FALSE)
+
+#Train and Validate
+train.data <- train.cleaned[train.index, ]
+validate.data <- train.cleaned[-train.index, ]
+```
+
+## Model Development and Evaluation
+
+1. Training the Model
+
+For this part, the Random Forest Classifier. The tree-based classifier eliminates the risk of training with correlated variables as it has a process which decorrelates the predictors. Moreover, the technique is robust to outliers, and has the ability to show the most important variables used in training.
+
+The model was trained with 52 predictor variables and 13737 observations.
+
+```{r training}
+control <- trainControl(method="cv", 6)
+model <- train(classe ~ ., data=train.data, method="rf",
+                  trControl=control, ntree=500)
+
+```
+
+2. Assessing the Model
+
+In this section, the model developed was assessed using the data separated for validation.
+
+```{r assessing}
+#Predicting with the Validate Set
+predictions <- predict(model, validate.data)
+confusionMatrix(validate.data$classe, predictions)
+
+#Accuracy
+accuracy <- postResample(predictions, validate.data$classe)
+accuracy.out <- accuracy[1]
+overall.ose <- 1 - as.numeric(confusionMatrix(validate.data$classe, predictions)$overall[1])
+
+print(paste("Accuracy: ", accuracy.out))
+print(paste("Out of Sample Error: ", overall.ose))
+
+```
+
+The accuracy and the out-of-sample error of the model are 0.9934 and 0.0066, respectively.
+
+3. Predicting with the Test Set
+
+```{r results}
+#Predicting with the Test Set
+results <- predict(model, test.cleanNA)
+results
+```
+
+4. Measuring the Variable Importance
+
+The importance of each variable was measured and ranked.
+
+```{r varimp}
+#Variable Importance
+var.imp <- as.data.frame(varImp(model)[[1]])
+var.imp <- var.imp %>% mutate(predictor = rownames(var.imp), importance = as.numeric(var.imp$Overall)) %>%
+  select(2,1) %>% arrange(-Overall)
+
+print(var.imp)
+```
+
+5. Retraining the Model
+
+The model was retrained with the Top 20 Variables
+
+```{r training2}
+#Retraining with the top 20 Variables
+control2 <- trainControl(method="cv", 6)
+model2 <- train(classe ~ ., data=(train.data %>% select(classe, var.imp$predictor[1:20])), method="rf",
+               trControl=control2, ntree=500)
+model2
+```
+
+6. Assessing the Retrained Model
+
+```{r assessing2}
+#Predicting with the Validate Set (var.imp)
+predictions.imp <- predict(model2, validate.data)
+confusionMatrix(validate.data$classe, predictions.imp)
+
+#Accuracy
+accuracy.imp <- postResample(predictions.imp, validate.data$classe)
+accuracy.imp.out <- accuracy.imp[1]
+overall.ose.imp <- 1 - as.numeric(confusionMatrix(validate.data$classe, predictions.imp)$overall[1])
+```
+
+The accuracy and the out-of-sample error of the model are 0.9913 and 0.0087, respectively. As seen, a tradeoff is that the second model has a slightly lower accuracy than the original model. Considering that the difference in accuracy is only minimal, and the predictors were reduced to only 20, the model will be used.
+
+7. Results for the Retrained Model
+
+```{r results2}
+results.imp <- predict(model2, test.cleanNA)
+results.imp
+```
